@@ -5,6 +5,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"time"
 
 	"golang.zx2c4.com/wireguard/tun"
 )
@@ -29,6 +30,15 @@ func CreateTUN() tun.Device {
 	}
 
 	log.Printf("TUN Interface created: %s", name)
+
+	// Configure the TUN interface with an IP address
+	if err := configureTUNInterface(name); err != nil {
+		log.Printf("Failed to configure TUN interface: %v", err)
+		device.Close()
+		return nil
+	}
+	// Give the interface a moment to be ready
+	time.Sleep(5 * time.Second)
 	return device
 }
 
@@ -49,9 +59,10 @@ func SetDefaultRoute() error {
 	}
 
 	// Add new default route through TUN
-	cmd = exec.Command("route", "add", "0.0.0.0", "mask", "0.0.0.0", "10.0.0.1")
+	cmd = exec.Command("route", "add", "0.0.0.0", "mask", "0.0.0.0", "10.0.0.1", "metric", "1")
 	if err := cmd.Run(); err != nil {
 		// If this fails, restore original route
+		fmt.Print("routing failed going back to drfault")
 		RestoreOriginalRoute()
 		return err
 	}
@@ -98,5 +109,28 @@ func RestoreOriginalRoute() error {
 		return err
 	}
 
+	return nil
+}
+
+func configureTUNInterface(interfaceName string) error {
+	cmd := exec.Command("netsh", "interface", "ip", "set", "address", "name="+interfaceName, "static", "10.0.0.2", "255.255.255.0")
+	if err := cmd.Run(); err != nil {
+		log.Printf("Failed to set IP address: %v", err)
+		return err
+	}
+
+	// Set DNS servers
+	cmd = exec.Command("netsh", "interface", "ip", "set", "dns",
+		"name="+interfaceName, "static", "8.8.8.8")
+	if err := cmd.Run(); err != nil {
+		log.Printf("Failed to set DNS: %v", err)
+		return err
+	}
+
+	// Add secondary DNS
+	cmd = exec.Command("netsh", "interface", "ip", "add", "dns",
+		"name="+interfaceName, "8.8.4.4", "index=2")
+	cmd.Run()
+	log.Printf("TUN interface %s configured with IP 10.0.0.2", interfaceName)
 	return nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/varun0310t/VPN/internal/tunnel"
 )
@@ -19,19 +20,47 @@ func main() {
 
 	tunnel.SetDefaultRoute()
 
-	// buffer := make([][]byte, 1)
-	// buffer[0] = make([]byte, 14000)
-	// count := 0
-	// len := make([]int, 1)
-	// for {
-	// 	n, err := ifce.Read(buffer, len, 0)
-	// 	if err != nil {
-	// 		fmt.Print("something went wrong")
-	// 	}
-	// 	if n > 0 {
-	// 		count++
-	// 		fmt.Println(count)
-	// 	}
-	// }
+	buffer := make([][]byte, 1)
+	buffer[0] = make([]byte, 1500)
+	count := 0
+	lengths := make([]int, 1)
 
+	fmt.Println("\nAnalyzing captured packets...")
+
+	for {
+		n, err := ifce.Read(buffer, lengths, 0)
+		if err != nil {
+			fmt.Printf("Read error: %v\n", err)
+			continue
+		}
+
+		if n > 0 {
+			count++
+			packet := buffer[0][:lengths[0]]
+
+			// Analyze the packet
+			if len(packet) >= 20 { // Minimum IP header
+				version := packet[0] >> 4
+				if version == 4 {
+					// Extract destination IP
+					destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
+					protocol := packet[9]
+
+					protocolName := "Unknown"
+					switch protocol {
+					case 1:
+						protocolName = "ICMP"
+					case 6:
+						protocolName = "TCP"
+					case 17:
+						protocolName = "UDP"
+					}
+
+					fmt.Printf("Packet %d: %s to %s (%d bytes)\n",
+						count, protocolName, destIP, lengths[0])
+				}
+			}
+
+		}
+	}
 }
