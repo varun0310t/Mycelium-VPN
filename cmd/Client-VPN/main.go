@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/varun0310t/VPN/internal/tunnel"
+	"golang.zx2c4.com/wireguard/tun"
 )
 
 var (
@@ -40,6 +43,9 @@ func main() {
 	}
 	defer serverConn.Close()
 	fmt.Println("Connected to VPN server successfully!")
+
+	// START RESPONSE READER (MISSING!)
+	go readResponsesFromServer(serverConn, ifce)
 
 	buffer := make([][]byte, 1)
 	buffer[0] = make([]byte, 1500)
@@ -132,4 +138,38 @@ func forwardPacketToServer(conn net.Conn, packet []byte) error {
 	}
 
 	return nil
+}
+
+func readResponsesFromServer(serverConn net.Conn, tunDevice tun.Device) {
+	for {
+		lengthBytes := make([]byte, 4)
+		serverConn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		_, err := io.ReadFull(serverConn, lengthBytes)
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Server disconnected")
+			} else {
+				fmt.Printf("Error reading response length: %v\n", err)
+			}
+			break
+		}
+		//parsing the length
+
+		responseLen := int(lengthBytes[0])<<24 | int(lengthBytes[1])<<16 | int(lengthBytes[2])<<8 | int(lengthBytes[3])
+
+		responsePacket := make([]byte, responseLen)
+		_, err = io.ReadFull(serverConn, responsePacket)
+		if err != nil {
+			fmt.Printf("Error reading response packet: %v\n", err)
+			break
+		}
+
+		// Write response back to TUN interface
+		_, err = tunDevice.Write([][]byte{responsePacket}, 0)
+		if err != nil {
+			fmt.Printf("Error writing response to TUN: %v\n", err)
+			continue
+		}
+
+	}
 }
