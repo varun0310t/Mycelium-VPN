@@ -5,8 +5,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
+
+	"golang.zx2c4.com/wireguard/tun"
 )
 
 const (
@@ -15,8 +18,10 @@ const (
 )
 
 type VPNServer struct {
-	clients    map[string]*ClientConnection
-	clientsMux sync.RWMutex
+	clients       map[string]*ClientConnection
+	clientsMux    sync.RWMutex
+	tunDevice     tun.Device
+	responsesChan chan ResponsePacket // Add this for response handling
 }
 
 type ClientConnection struct {
@@ -26,12 +31,34 @@ type ClientConnection struct {
 	packetChan chan []byte
 }
 
+// Add this new struct for responses
+type ResponsePacket struct {
+	packet   []byte
+	clientID string
+}
+
 func main() {
 	fmt.Println("🚀 Starting VPN Server...")
 
 	server := &VPNServer{
-		clients: make(map[string]*ClientConnection),
+		clients:       make(map[string]*ClientConnection),
+		responsesChan: make(chan ResponsePacket, 1000), // Buffer for responses
 	}
+
+	// Create TUN interface for internet forwarding
+	err := server.initTunInterface()
+	if err != nil {
+		fmt.Printf("❌ Failed to create TUN interface: %v\n", err)
+		fmt.Println("💡 Run as Administrator for TUN interface access")
+		os.Exit(1)
+	}
+	defer server.tunDevice.Close()
+
+	// Start global response listener (reads from TUN)
+	go server.listenForInternetResponses()
+
+	// Start response dispatcher (sends to clients)
+	go server.dispatchResponsesToClients()
 
 	// Start the server
 	listener, err := net.Listen("tcp", ":"+SERVER_PORT)
@@ -60,6 +87,89 @@ func main() {
 	}
 }
 
+func (s *VPNServer) initTunInterface() error {
+	// Create TUN interface on server (different name than client)
+	device, err := tun.CreateTUN("VPN-Server", 1420)
+	if err != nil {
+		return fmt.Errorf("failed to create server TUN: %v", err)
+	}
+
+	s.tunDevice = device
+
+	name, err := device.Name()
+	if err != nil {
+		device.Close()
+		return fmt.Errorf("failed to get TUN name: %v", err)
+	}
+
+	// Configure server TUN with different IP range
+	err = s.configureTunInterface(name)
+	if err != nil {
+		device.Close()
+		return fmt.Errorf("failed to configure TUN: %v", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	fmt.Printf("✅ Server TUN interface '%s' created successfully\n", name)
+	return nil
+}
+
+func (s *VPNServer) configureTunInterface(interfaceName string) error {
+	// Set server TUN IP (different from client: 10.0.1.1 vs 10.0.0.2)
+	cmd := exec.Command("netsh", "interface", "ip", "set", "address",
+		"name="+interfaceName, "static", "10.0.1.1", "255.255.255.0")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to set server IP: %v", err)
+	}
+
+	// Add route for client traffic (10.0.0.0/24 -> server TUN)
+	cmd = exec.Command("route", "add", "10.0.0.0", "mask", "255.255.255.0", "10.0.1.1")
+	cmd.Run() // Ignore error if route already exists
+
+	fmt.Printf("Server TUN configured with IP 10.0.1.1\n")
+	return nil
+}
+
+// Replace forwardToInternet with TUN-based forwarding
+func (s *VPNServer) forwardToInternet(packet []byte, destIP string, protocol string) error {
+	if len(packet) < 20 {
+		return fmt.Errorf("packet too small")
+	}
+
+	// Skip problematic packets that caused issues before
+	destBytes := packet[16:20]
+
+	// Skip multicast addresses (224.0.0.0 to 239.255.255.255)
+	if destBytes[0] >= 224 && destBytes[0] <= 239 {
+		return nil // Silently skip
+	}
+
+	// Skip broadcast addresses
+	if destBytes[3] == 255 {
+		return nil // Silently skip
+	}
+
+	// Skip IGMP packets (Protocol 2)
+	if packet[9] == 2 {
+		return nil // Silently skip
+	}
+
+	// Forward packet via TUN interface - OS handles routing!
+	_, err := s.tunDevice.Write([][]byte{packet}, 0)
+	if err != nil {
+		return fmt.Errorf("failed to write to TUN: %v", err)
+	}
+
+	// Log successful forwarding
+	if protocol == "ICMP" || protocol == "UDP" || protocol == "TCP" {
+		fmt.Printf("🌍 Forwarded %s packet to %s via TUN (%d bytes)\n",
+			protocol, destIP, len(packet))
+	}
+
+	return nil
+}
+
 func (s *VPNServer) handleClient(conn net.Conn, clientID string) {
 	defer conn.Close()
 
@@ -81,6 +191,7 @@ func (s *VPNServer) handleClient(conn net.Conn, clientID string) {
 		s.clientsMux.Unlock()
 		fmt.Printf("🔌 Client disconnected: %s\n", clientID)
 	}()
+
 	packetCount := 0
 	totalBytes := 0
 
@@ -175,26 +286,151 @@ func (s *VPNServer) processPacket(client *ClientConnection, packet []byte, packe
 			packetNum, protocolName, sourceIP, destIP, len(packet))
 	}
 
-	// TODO: Forward packet to real internet
-
-	s.forwardToInternet(packet, destIP.String(), protocolName)
-
-	// TODO: Send response back to client
-
-	if packetNum%50 == 0 {
-		s.sendMockResponse(client, packet)
+	// Forward packet to real internet
+	err := s.forwardToInternet(packet, destIP.String(), protocolName)
+	if err != nil {
+		fmt.Printf("❌ Failed to forward packet: %v\n", err)
 	}
 }
 
-func (s *VPNServer) forwardToInternet(packet []byte, destIP string, protocol string) {
-	//todo
+// NEW: Global response listener - reads packets FROM internet
+func (s *VPNServer) listenForInternetResponses() {
+	fmt.Println("🔄 Starting internet response listener...")
 
+	buffer := make([][]byte, 1)
+	buffer[0] = make([]byte, 1500)
+	lengths := make([]int, 1)
+	responseCount := 0
+
+	for {
+		// Read response packets from TUN interface
+		n, err := s.tunDevice.Read(buffer, lengths, 0)
+		if err != nil {
+			continue // Keep listening even on errors
+		}
+
+		if n > 0 && lengths[0] > 0 {
+			responseCount++
+			responsePacket := make([]byte, lengths[0])
+			copy(responsePacket, buffer[0][:lengths[0]])
+
+			// Analyze response packet to find which client it belongs to
+			clientID := s.findClientForResponse(responsePacket)
+			if clientID != "" {
+				// Queue response for dispatch
+				select {
+				case s.responsesChan <- ResponsePacket{
+					packet:   responsePacket,
+					clientID: clientID,
+				}:
+					// Successfully queued
+				default:
+					// Channel full, drop packet
+					fmt.Printf("⚠️ Response channel full, dropping packet\n")
+				}
+
+				if responseCount%50 == 0 {
+					fmt.Printf("📥 Processed %d internet responses\n", responseCount)
+				}
+			}
+		}
+	}
 }
 
-func (s *VPNServer) sendMockResponse(client *ClientConnection, originalPacket []byte) {
-	//todo
+// NEW: Find which client a response packet belongs to
+func (s *VPNServer) findClientForResponse(packet []byte) string {
+	if len(packet) < 20 {
+		return ""
+	}
 
-	fmt.Printf("📤 [SIM] Would send response back to %s\n", client.clientID)
+	// Parse IP header to get destination IP
+	// In response packets, the destination IP is the original source (client)
+	destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
+
+	// Check if this is destined for a VPN client
+	if destIP.String() == "10.0.0.2" {
+		// This is for our VPN client
+		// In a multi-client setup, you'd map IPs to client IDs
+		s.clientsMux.RLock()
+		defer s.clientsMux.RUnlock()
+
+		// Return the first (and only) client for now
+		for clientID := range s.clients {
+			return clientID
+		}
+	}
+
+	return ""
+}
+
+// NEW: Dispatch responses to appropriate clients
+func (s *VPNServer) dispatchResponsesToClients() {
+	fmt.Println("📤 Starting response dispatcher...")
+
+	for responsePacket := range s.responsesChan {
+		s.clientsMux.RLock()
+		client, exists := s.clients[responsePacket.clientID]
+		s.clientsMux.RUnlock()
+
+		if exists {
+			err := s.sendResponseToClient(client, responsePacket.packet)
+			if err != nil {
+				fmt.Printf("❌ Failed to send response to %s: %v\n",
+					responsePacket.clientID, err)
+			} else {
+				// Log successful response
+				if len(responsePacket.packet) >= 20 {
+					protocol := responsePacket.packet[9]
+					var protocolName string
+					switch protocol {
+					case 1:
+						protocolName = "ICMP"
+					case 6:
+						protocolName = "TCP"
+					case 17:
+						protocolName = "UDP"
+					default:
+						protocolName = fmt.Sprintf("Proto-%d", protocol)
+					}
+
+					sourceIP := net.IPv4(responsePacket.packet[12], responsePacket.packet[13],
+						responsePacket.packet[14], responsePacket.packet[15])
+
+					fmt.Printf("📩 Sent %s response from %s to client (%d bytes)\n",
+						protocolName, sourceIP, len(responsePacket.packet))
+				}
+			}
+		}
+	}
+}
+
+// Update the existing sendResponseToClient function
+func (s *VPNServer) sendResponseToClient(client *ClientConnection, responsePacket []byte) error {
+	// Send packet length first (same format as client sends to server)
+	packetLen := len(responsePacket)
+	lengthBytes := []byte{
+		byte(packetLen >> 24),
+		byte(packetLen >> 16),
+		byte(packetLen >> 8),
+		byte(packetLen),
+	}
+
+	// Set write deadline to prevent hanging
+	client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
+	// Send length
+	_, err := client.conn.Write(lengthBytes)
+	if err != nil {
+		return fmt.Errorf("failed to send response length: %v", err)
+	}
+
+	// Send packet
+	_, err = client.conn.Write(responsePacket)
+	if err != nil {
+		return fmt.Errorf("failed to send response packet: %v", err)
+	}
+
+	return nil
 }
 
 // Helper function to get server statistics
