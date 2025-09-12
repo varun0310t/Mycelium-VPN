@@ -141,35 +141,54 @@ func forwardPacketToServer(conn net.Conn, packet []byte) error {
 }
 
 func readResponsesFromServer(serverConn net.Conn, tunDevice tun.Device) {
+	fmt.Println("📥 Starting response reader...")
+	responseCount := 0
+
 	for {
 		lengthBytes := make([]byte, 4)
 		serverConn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		_, err := io.ReadFull(serverConn, lengthBytes)
 		if err != nil {
 			if err == io.EOF {
-				fmt.Println("Server disconnected")
+				fmt.Println("📡 Server disconnected")
 			} else {
-				fmt.Printf("Error reading response length: %v\n", err)
+				fmt.Printf("❌ Error reading response length: %v\n", err)
 			}
 			break
 		}
-		//parsing the length
 
 		responseLen := int(lengthBytes[0])<<24 | int(lengthBytes[1])<<16 | int(lengthBytes[2])<<8 | int(lengthBytes[3])
+
+		// ✅ ADD VALIDATION
+		if responseLen <= 0 || responseLen > 1500 {
+			fmt.Printf("❌ Invalid response length: %d\n", responseLen)
+			break
+		}
 
 		responsePacket := make([]byte, responseLen)
 		_, err = io.ReadFull(serverConn, responsePacket)
 		if err != nil {
-			fmt.Printf("Error reading response packet: %v\n", err)
+			fmt.Printf("❌ Error reading response packet: %v\n", err)
 			break
 		}
 
 		// Write response back to TUN interface
 		_, err = tunDevice.Write([][]byte{responsePacket}, 0)
 		if err != nil {
-			fmt.Printf("Error writing response to TUN: %v\n", err)
+			fmt.Printf("❌ Error writing response to TUN: %v\n", err)
 			continue
 		}
 
+		responseCount++
+		if responseCount%25 == 0 {
+			fmt.Printf("📨 Received %d responses from server\n", responseCount)
+		}
+
+		// ✅ DEBUG: Log first few responses
+		if responseCount <= 5 && len(responsePacket) >= 20 {
+			sourceIP := net.IPv4(responsePacket[12], responsePacket[13], responsePacket[14], responsePacket[15])
+			destIP := net.IPv4(responsePacket[16], responsePacket[17], responsePacket[18], responsePacket[19])
+			fmt.Printf("📩 Response #%d: %s → %s (%d bytes)\n", responseCount, sourceIP, destIP, len(responsePacket))
+		}
 	}
 }

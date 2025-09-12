@@ -116,18 +116,18 @@ func (s *VPNServer) initTunInterface() error {
 }
 
 func (s *VPNServer) configureTunInterface(interfaceName string) error {
-	// CHANGE: Use same subnet as client
+	// CHANGE THIS LINE:
 	cmd := exec.Command("netsh", "interface", "ip", "set", "address",
-		"name="+interfaceName, "static", "10.0.0.1", "255.255.255.0") // Changed from 10.0.1.1
+		"name="+interfaceName, "static", "10.0.0.1", "255.255.255.0") // ← Changed from 10.0.1.1 to 10.0.0.1
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to set server IP: %v", err)
 	}
 
-	// CHANGE: Route client traffic to server TUN
-	cmd = exec.Command("route", "add", "10.0.0.0", "mask", "255.255.255.0", "10.0.0.1") // Changed from 10.0.1.1
-	cmd.Run()                                                                           // Ignore error if route already exists
+	// CHANGE THIS LINE TOO:
+	cmd = exec.Command("route", "add", "10.0.0.0", "mask", "255.255.255.0", "10.0.0.1") // ← Changed from 10.0.1.1
+	cmd.Run()
 
-	fmt.Printf("Server TUN configured with IP 10.0.0.1\n") // Updated message
+	fmt.Printf("Server TUN configured with IP 10.0.0.1\n") // ← Updated message
 	return nil
 }
 
@@ -301,12 +301,18 @@ func (s *VPNServer) listenForInternetResponses() {
 	buffer[0] = make([]byte, 1500)
 	lengths := make([]int, 1)
 	responseCount := 0
+	errorCount := 0
 
 	for {
-		// Read response packets from TUN interface
+		// Read from TUN device
 		n, err := s.tunDevice.Read(buffer, lengths, 0)
 		if err != nil {
-			continue // Keep listening even on errors
+			errorCount++
+			if errorCount%1000 == 0 {
+				fmt.Printf("🔍 TUN read errors: %d (latest: %v)\n", errorCount, err)
+			}
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
 
 		if n > 0 && lengths[0] > 0 {
@@ -314,23 +320,47 @@ func (s *VPNServer) listenForInternetResponses() {
 			responsePacket := make([]byte, lengths[0])
 			copy(responsePacket, buffer[0][:lengths[0]])
 
-			// Analyze response packet to find which client it belongs to
+			// ✅ DEBUG: Log all responses
+			if responseCount <= 10 {
+				if len(responsePacket) >= 20 {
+					sourceIP := net.IPv4(responsePacket[12], responsePacket[13], responsePacket[14], responsePacket[15])
+					destIP := net.IPv4(responsePacket[16], responsePacket[17], responsePacket[18], responsePacket[19])
+					protocol := responsePacket[9]
+					protocolName := "Unknown"
+					switch protocol {
+					case 1:
+						protocolName = "ICMP"
+					case 6:
+						protocolName = "TCP"
+					case 17:
+						protocolName = "UDP"
+					}
+					fmt.Printf("🔍 Response #%d: %s %s → %s (%d bytes)\n",
+						responseCount, protocolName, sourceIP, destIP, len(responsePacket))
+				}
+			}
+
 			clientID := s.findClientForResponse(responsePacket)
 			if clientID != "" {
-				// Queue response for dispatch
 				select {
 				case s.responsesChan <- ResponsePacket{
 					packet:   responsePacket,
 					clientID: clientID,
 				}:
-					// Successfully queued
+					if responseCount <= 5 {
+						fmt.Printf("✅ Queued response #%d for client %s\n", responseCount, clientID)
+					}
 				default:
-					// Channel full, drop packet
 					fmt.Printf("⚠️ Response channel full, dropping packet\n")
 				}
 
 				if responseCount%50 == 0 {
 					fmt.Printf("📥 Processed %d internet responses\n", responseCount)
+				}
+			} else {
+				if responseCount <= 10 && len(responsePacket) >= 20 {
+					destIP := net.IPv4(responsePacket[16], responsePacket[17], responsePacket[18], responsePacket[19])
+					fmt.Printf("🤔 No client found for response to %s\n", destIP)
 				}
 			}
 		}
