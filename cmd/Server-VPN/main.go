@@ -116,18 +116,18 @@ func (s *VPNServer) initTunInterface() error {
 }
 
 func (s *VPNServer) configureTunInterface(interfaceName string) error {
-	// Set server TUN IP (different from client: 10.0.1.1 vs 10.0.0.2)
+	// CHANGE: Use same subnet as client
 	cmd := exec.Command("netsh", "interface", "ip", "set", "address",
-		"name="+interfaceName, "static", "10.0.1.1", "255.255.255.0")
+		"name="+interfaceName, "static", "10.0.0.1", "255.255.255.0") // Changed from 10.0.1.1
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to set server IP: %v", err)
 	}
 
-	// Add route for client traffic (10.0.0.0/24 -> server TUN)
-	cmd = exec.Command("route", "add", "10.0.0.0", "mask", "255.255.255.0", "10.0.1.1")
-	cmd.Run() // Ignore error if route already exists
+	// CHANGE: Route client traffic to server TUN
+	cmd = exec.Command("route", "add", "10.0.0.0", "mask", "255.255.255.0", "10.0.0.1") // Changed from 10.0.1.1
+	cmd.Run()                                                                           // Ignore error if route already exists
 
-	fmt.Printf("Server TUN configured with IP 10.0.1.1\n")
+	fmt.Printf("Server TUN configured with IP 10.0.0.1\n") // Updated message
 	return nil
 }
 
@@ -343,18 +343,13 @@ func (s *VPNServer) findClientForResponse(packet []byte) string {
 		return ""
 	}
 
-	// Parse IP header to get destination IP
-	// In response packets, the destination IP is the original source (client)
 	destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
 
 	// Check if this is destined for a VPN client
-	if destIP.String() == "10.0.0.2" {
-		// This is for our VPN client
-		// In a multi-client setup, you'd map IPs to client IDs
+	if destIP.String() == "10.0.0.2" { // This should now work!
 		s.clientsMux.RLock()
 		defer s.clientsMux.RUnlock()
 
-		// Return the first (and only) client for now
 		for clientID := range s.clients {
 			return clientID
 		}
