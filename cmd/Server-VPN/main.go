@@ -266,7 +266,7 @@ func ListenForResponse() error {
 		destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
 		// Extract source IP to check if it's from client
 		sourceIP := net.IPv4(packet[12], packet[13], packet[14], packet[15])
-		fmt.Printf("source ip %s destip %s", sourceIP.String(), destIP.String())
+		fmt.Printf("source ip %s destip %s \n", sourceIP.String(), destIP.String())
 		// Skip packet if source IP is from client (192.168.1.12)
 		if sourceIP.String() == "192.168.1.12" {
 			continue
