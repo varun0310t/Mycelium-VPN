@@ -40,6 +40,10 @@ func main() {
 	if err != nil {
 		fmt.Printf("Error Listening Packets")
 	}
+	err = ListenForResponse()
+	if err != nil {
+		fmt.Printf("Error Listening Response")
+	}
 }
 
 func CreateRawSocket() int {
@@ -225,6 +229,7 @@ func calculateIPChecksum(header []byte) uint16 {
 }
 
 func ListenForResponse() error {
+	fmt.Printf("Listening for Reponse")
 	buffer := make([]byte, 4096)
 	for {
 		n, _, err := syscall.Recvfrom(CaptureSocket, buffer, 0)
