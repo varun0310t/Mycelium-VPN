@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  vpn-test:
+    build: .
+    container_name: vpn-packet-test
+    privileged: true  # Required for TUN/TAP and iptables
+    cap_add:
+      - NET_ADMIN     # Required for network operations
+      - SYS_ADMIN     # Required for TUN/TAP
+    devices:
+      - "/dev/net/tun:/dev/net/tun"  # TUN device access
+    sysctls:
+      - net.ipv4.ip_forward=1        # Enable IP forwarding
+    networks:
+      - vpn-network
+    ports:
+      - "8080:8080"  # If you need to expose any ports
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+    volumes:
+      - ./logs:/app/logs  # For logging output
+    stdin_open: true
+    tty: true
+
+networks:
+  vpn-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
