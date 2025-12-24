@@ -6,30 +6,51 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
 	"syscall"
+	"unsafe"
 )
 
-var Socket int
-var CaptureSocket int
+var TunFd int
 var UDPConn *net.UDPConn
 var ClientAddr *net.UDPAddr
 
+const (
+	TUNSETIFF = 0x400454ca
+	IFF_TUN   = 0x0001
+	IFF_NO_PI = 0x1000
+)
+
+type ifreq struct {
+	name  [16]byte
+	flags uint16
+	_     [22]byte
+}
+
 func main() {
-	// Create raw socket
-	Socket = CreateRawSocket()
-	if Socket == -1 {
-		panic("Failed to create raw socket")
-	}
-	defer syscall.Close(Socket)
-
-	CaptureSocket = CreateCaptureSocket()
-	if CaptureSocket == -1 {
-		panic("Failed to create capture socket")
-	}
-	defer syscall.Close(CaptureSocket)
-
-	// ✅ Create UDP listener instead of TCP
 	var err error
+
+	// Create TUN interface
+	TunFd, err = CreateTunInterface("tun0")
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create TUN interface: %v", err))
+	}
+	defer syscall.Close(TunFd)
+
+	// Configure TUN interface
+	err = ConfigureTunInterface()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to configure TUN interface: %v", err))
+	}
+
+	// Setup NAT and forwarding
+	err = SetupNATAndForwarding()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to setup NAT: %v", err))
+	}
+
+	// Create UDP listener
 	UDPConn, err = net.ListenUDP("udp", &net.UDPAddr{
 		IP:   net.ParseIP("0.0.0.0"),
 		Port: 8080,
@@ -40,8 +61,9 @@ func main() {
 	defer UDPConn.Close()
 
 	fmt.Println("✅ Server ready - UDP listening on port 8080")
+	fmt.Println("✅ TUN interface tun0 created and configured")
 
-	// ✅ Run both goroutines
+	// Run goroutines
 	go func() {
 		err := ListenForPackets(UDPConn)
 		if err != nil {
@@ -50,9 +72,9 @@ func main() {
 	}()
 
 	go func() {
-		err := ListenForResponse()
+		err := ReadFromTunAndSendToClient()
 		if err != nil {
-			fmt.Printf("❌ ListenForResponse error: %v\n", err)
+			fmt.Printf("❌ ReadFromTunAndSendToClient error: %v\n", err)
 		}
 	}()
 
@@ -60,237 +82,141 @@ func main() {
 	select {} // Block forever
 }
 
-func CreateRawSocket() int {
-	fmt.Printf(" Trying to Creating Raw Socket ")
-	Socket, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_RAW)
+func CreateTunInterface(name string) (int, error) {
+	fmt.Printf("Creating TUN interface %s\n", name)
 
+	fd, err := syscall.Open("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {
-		fmt.Printf("Error creating Raw socket %v", err)
-		return -1
+		return -1, fmt.Errorf("failed to open /dev/net/tun: %v", err)
 	}
 
-	// Enable IP_HDRINCL so we manage our own ip headers instead of kernel managing it
-	err = syscall.SetsockoptInt(Socket, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1)
-	if err != nil {
-		fmt.Printf("Error Enabling IP_HDRINCL %v", err)
-		return -1
+	var ifr ifreq
+	copy(ifr.name[:], name)
+	ifr.flags = IFF_TUN | IFF_NO_PI
+
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(TUNSETIFF), uintptr(unsafe.Pointer(&ifr)))
+	if errno != 0 {
+		syscall.Close(fd)
+		return -1, fmt.Errorf("ioctl TUNSETIFF failed: %v", errno)
 	}
-	fmt.Printf("Raw socket created (fd: %d)\n", Socket)
-	return Socket
+
+	fmt.Printf("✅ TUN interface created (fd: %d)\n", fd)
+	return fd, nil
 }
 
-func CreateTCPSocket() int {
-	fmt.Printf(" Trying to Creating TCP Socket ")
-	Socket, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
-	if err != nil {
-		fmt.Printf("Error creating TCP socket %v", err)
-		return -1
-	}
-	fmt.Printf("TCP socket created (fd: %d)\n", Socket)
-	return Socket
-}
+func ConfigureTunInterface() error {
+	fmt.Println("Configuring TUN interface...")
 
-func BindAndListenTCP(Socket int, Port uint16) error {
-	addr := &syscall.SockaddrInet4{
-		Port: int(Port),
-		Addr: [4]byte{0, 0, 0, 0},
-	}
-	err := syscall.Bind(Socket, addr)
-	if err != nil {
-		return fmt.Errorf("bind failed: %v", err)
+	// Bring interface up with IP
+	cmd := exec.Command("ip", "addr", "add", "10.8.0.1/24", "dev", "tun0")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to set IP: %v", err)
 	}
 
-	// Start listening for connections
-	err = syscall.Listen(Socket, 128) // backlog of 128 connections
-	if err != nil {
-		return fmt.Errorf("listen failed: %v", err)
+	cmd = exec.Command("ip", "link", "set", "dev", "tun0", "up")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to bring interface up: %v", err)
 	}
-	fmt.Printf("✅ TCP socket listening on port %d\n", Port)
+
+	fmt.Println("✅ TUN interface configured with IP 10.8.0.1/24")
 	return nil
 }
 
-func ListenForConnection(Port string) (net.Conn, error) {
-	listener, err := net.Listen("tcp", ":"+Port)
-	if err != nil {
-		return nil, fmt.Errorf("failed to listen on port %s: %v", Port, err)
-	}
-	defer listener.Close()
+func SetupNATAndForwarding() error {
+	fmt.Println("Setting up NAT and packet forwarding...")
 
-	fmt.Printf("Listening for connections on port %s\n", Port)
-	conn, err := listener.Accept()
-	if err != nil {
-		return nil, fmt.Errorf("failed to accept connection: %v", err)
+	// Enable IP forwarding
+	cmd := exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to enable IP forwarding: %v", err)
 	}
 
-	fmt.Printf("Connection accepted from %s\n", conn.RemoteAddr())
-	return conn, nil
+	// Setup NAT masquerading (assumes eth0 as main interface, change if needed)
+	cmd = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "10.8.0.0/24", "-o", "eth0", "-j", "MASQUERADE")
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("⚠️ Warning: iptables NAT rule may already exist or eth0 not found: %v\n", err)
+	}
+
+	// Allow forwarding
+	cmd = exec.Command("iptables", "-A", "FORWARD", "-i", "tun0", "-j", "ACCEPT")
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("⚠️ Warning: iptables forward rule may already exist: %v\n", err)
+	}
+
+	cmd = exec.Command("iptables", "-A", "FORWARD", "-o", "tun0", "-j", "ACCEPT")
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("⚠️ Warning: iptables forward rule may already exist: %v\n", err)
+	}
+
+	fmt.Println("✅ NAT and forwarding configured")
+	return nil
 }
 func ListenForPackets(conn *net.UDPConn) error {
 	fmt.Printf("Listening for UDP packets from client\n")
 
-	buffer := make([]byte, 65535) // Max UDP packet size
+	buffer := make([]byte, 65535)
 
 	for {
-		// Read UDP packet
 		n, addr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			fmt.Printf("❌ Error reading UDP packet: %v\n", err)
 			continue
 		}
 
-		// Store client address for responses
 		ClientAddr = addr
 
 		if n > 0 {
 			packet := buffer[:n]
 
-			// Forward packet to internet
-			err = ForwardPacketToInternet(packet)
+			// Extract destination IP for logging
+			if len(packet) >= 20 {
+				destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
+				fmt.Printf("📥 Received packet from client, dest: %s\n", destIP)
+			}
+
+			// Write packet to TUN interface - kernel will route it
+			err = WriteToTun(packet)
 			if err != nil {
-				fmt.Printf("❌ Error forwarding packet: %v\n", err)
+				fmt.Printf("❌ Error writing to TUN: %v\n", err)
 			}
 		}
 	}
 }
 
-// Forward packet to internet
-func ForwardPacketToInternet(Packet []byte) error {
-	if len(Packet) < 20 {
-		return fmt.Errorf("packet too short for IP header")
-	}
-
-	// Extract destination IP from the packet
-	destIP := net.IPv4(Packet[16], Packet[17], Packet[18], Packet[19])
-	fmt.Printf("🌍 Forwarding packet to internet: %s\n", destIP)
-
-	// // Modify source IP to VPN server's public IP (NAT)
-	// Packet[12] = 172 // VPN server's IP
-	// Packet[13] = 30
-	// Packet[14] = 66
-	// Packet[15] = 2
-
-	// // Recalculate IP checksum after modifying source IP
-	// Packet[10] = 0 // Clear existing checksum
-	// Packet[11] = 0
-	// checksum := calculateIPChecksum(Packet[:20])
-	// Packet[10] = byte(checksum >> 8)
-	// Packet[11] = byte(checksum & 0xFF)
-
-	// Send packet to internet using raw socket
-	return SendPacket(Socket, Packet, destIP.String())
-}
-
-// Send packet using raw socket
-func SendPacket(socket int, packet []byte, destIP string) error {
-	fmt.Printf("📤 Sending %d bytes to %s\n", len(packet), destIP)
-
-	// Parse destination IP
-	ip := net.ParseIP(destIP)
-	if ip == nil {
-		return fmt.Errorf("invalid IP address: %s", destIP)
-	}
-	ip = ip.To4()
-	if ip == nil {
-		return fmt.Errorf("not IPv4 address: %s", destIP)
-	}
-
-	// Create sockaddr for destination
-	addr := &syscall.SockaddrInet4{
-		Port: 0, // This Network layer socket so no port
-		Addr: [4]byte{ip[0], ip[1], ip[2], ip[3]},
-	}
-
-	// Send packet using raw socket
-	err := syscall.Sendto(socket, packet, 0, addr)
+func WriteToTun(packet []byte) error {
+	n, err := syscall.Write(TunFd, packet)
 	if err != nil {
-		return fmt.Errorf("sendto failed: %v", err)
+		return fmt.Errorf("failed to write to TUN: %v", err)
 	}
-
-	fmt.Printf("✅ Packet sent successfully to %s (%d bytes)\n", destIP, len(packet))
+	fmt.Printf("✅ Wrote %d bytes to TUN interface\n", n)
 	return nil
 }
 
-// Calculate IP header checksum
-func calculateIPChecksum(header []byte) uint16 {
-	var sum uint32
-
-	// Sum all 16-bit words in header
-	for i := 0; i < len(header)-1; i += 2 {
-		sum += uint32(header[i])<<8 + uint32(header[i+1])
-	}
-
-	// Add odd byte if present
-	if len(header)%2 == 1 {
-		sum += uint32(header[len(header)-1]) << 8
-	}
-
-	// Add carry bits
-	for sum>>16 != 0 {
-		sum = (sum & 0xFFFF) + (sum >> 16)
-	}
-
-	// Return one's complement
-	return uint16(^sum)
-}
-
-func ListenForResponse() error {
-	fmt.Printf("Listening for Response\n")
-	buffer := make([]byte, 4096)
+func ReadFromTunAndSendToClient() error {
+	fmt.Println("Reading packets from TUN interface...")
+	buffer := make([]byte, 65535)
 
 	for {
-		n, _, err := syscall.Recvfrom(CaptureSocket, buffer, 0)
+		n, err := syscall.Read(TunFd, buffer)
 		if err != nil {
-			fmt.Printf("⚠️ Receive error: %v\n", err)
+			fmt.Printf("❌ Error reading from TUN: %v\n", err)
 			continue
 		}
 
-		// ✅ FIX: AF_PACKET socket includes Ethernet header (14 bytes)
-		// Ethernet header: [6 bytes dest MAC][6 bytes src MAC][2 bytes EtherType]
-		if n < 34 { // 14 (Ethernet) + 20 (IP header minimum)
-			continue
-		}
+		if n > 0 {
+			packet := buffer[:n]
 
-		// Skip Ethernet header (14 bytes) to get to IP packet
-		packet := buffer[14:n]
+			// Extract source and dest IPs for logging
+			if len(packet) >= 20 {
+				sourceIP := net.IPv4(packet[12], packet[13], packet[14], packet[15])
+				destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
+				fmt.Printf("📤 Read from TUN: %s -> %s\n", sourceIP, destIP)
+			}
 
-		if len(packet) < 20 {
-			continue // Skip packets too short for IP header
-		}
-
-		// Extract destination IP (bytes 16-19 of IP header)
-		destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
-		// Extract source IP (bytes 12-15 of IP header)
-		sourceIP := net.IPv4(packet[12], packet[13], packet[14], packet[15])
-
-		fmt.Printf("📦 Captured packet - Source: %s -> Dest: %s\n", sourceIP.String(), destIP.String())
-
-		// Skip packet if source IP is from client (avoid loops)
-		if sourceIP.String() == "172.25.0.3" {
-			fmt.Printf("⏩ Skipping packet from client\n")
-			continue
-		}
-
-		// Check if this packet is meant for our VPN server (responses to forwarded packets)
-		if destIP.String() == "172.25.0.2" {
-			fmt.Printf("📥 Received response packet for client: %s -> %s\n", sourceIP, destIP)
-
-			// Modify destination IP back to client's virtual IP
-			packet[16] = 10 // Client's virtual IP: 10.8.0.2
-			packet[17] = 8
-			packet[18] = 0
-			packet[19] = 2
-
-			// Recalculate IP checksum
-			packet[10] = 0
-			packet[11] = 0
-			checksum := calculateIPChecksum(packet[:20])
-			packet[10] = byte(checksum >> 8)
-			packet[11] = byte(checksum & 0xFF)
-
-			// Send via UDP
+			// Send packet back to client via UDP
 			err = SendPacketToClient(packet)
 			if err != nil {
-				fmt.Printf("❌ Error sending packet to client: %v\n", err)
+				fmt.Printf("❌ Error sending to client: %v\n", err)
 			}
 		}
 	}
@@ -301,7 +227,6 @@ func SendPacketToClient(packet []byte) error {
 		return fmt.Errorf("no client address available")
 	}
 
-	// ✅ UDP: Send packet directly (no length prefix needed)
 	_, err := UDPConn.WriteToUDP(packet, ClientAddr)
 	if err != nil {
 		return fmt.Errorf("failed to send UDP packet: %v", err)
@@ -309,21 +234,4 @@ func SendPacketToClient(packet []byte) error {
 
 	fmt.Printf("✅ Sent packet to client (%d bytes)\n", len(packet))
 	return nil
-}
-
-func CreateCaptureSocket() int {
-	fmt.Printf(" Trying to Creating Capture Raw Socket ")
-	captureSocket, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_IP)))
-
-	if err != nil {
-		fmt.Printf("Error creating Raw socket %v", err)
-		return -1
-	}
-
-	fmt.Printf("Capture socket created (fd: %d)\n", Socket)
-	return captureSocket
-}
-
-func htons(i uint16) uint16 {
-	return (i<<8)&0xff00 | i>>8
 }

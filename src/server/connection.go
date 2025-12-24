@@ -1,4 +1,7 @@
-package src
+//go:build linux
+// +build linux
+
+package server
 
 import (
 	"fmt"
@@ -11,7 +14,7 @@ import (
 // No virtual IP tracking needed - client handles that!
 type ClientSession struct {
 	Addr          *net.UDPAddr
-	NATPort       int
+	AssignedIP    int
 	LastSeen      time.Time
 	Authenticated bool
 	BytesSent     uint64
@@ -20,18 +23,18 @@ type ClientSession struct {
 }
 
 type Manager struct {
-	sessions map[string]*ClientSession
-	natPorts map[int]*ClientSession
-	PortPool *PortPool
-	mu       sync.RWMutex
+	sessions    map[string]*ClientSession
+	assignedIPs map[int]*ClientSession
+	IPPool      *IPPool
+	mu          sync.RWMutex
 }
 
 func NewManager() (*Manager, error) {
 
 	return &Manager{
-		sessions: make(map[string]*ClientSession),
-		natPorts: make(map[int]*ClientSession),
-		PortPool: NewPortPool(ServerCfg.NATPortMin, ServerCfg.NATPortMax),
+		sessions:    make(map[string]*ClientSession),
+		assignedIPs: make(map[int]*ClientSession),
+		IPPool:      NewIPPool(ServerCfg.IPPoolMin, ServerCfg.IPPoolMax),
 	}, nil
 }
 
@@ -47,22 +50,22 @@ func (m *Manager) AddClient(addr *net.UDPAddr) error {
 		return nil
 	}
 
-	natPort, err := m.PortPool.Allocate()
+	assignedIP, err := m.IPPool.Allocate()
 	if err != nil {
-		return fmt.Errorf("failed to allocate NAT port: %w", err)
+		return fmt.Errorf("failed to allocate IP: %w", err)
 	}
 
 	session := &ClientSession{
 		Addr:        addr,
-		NATPort:     natPort,
+		AssignedIP:  assignedIP,
 		LastSeen:    time.Now(),
 		ConnectedAt: time.Now(),
 	}
 
 	m.sessions[key] = session
-	m.natPorts[natPort] = session
+	m.assignedIPs[assignedIP] = session
 
-	fmt.Printf("Client connected: %s -> NAT Port: %d\n", addr.String(), natPort)
+	fmt.Printf("Client connected: %s -> Assigned IP: 10.8.0.%d\n", addr.String(), assignedIP)
 	return nil
 }
 
@@ -75,12 +78,12 @@ func (m *Manager) GetClient(addr *net.UDPAddr) (*ClientSession, bool) {
 	return session, exists
 }
 
-// GetClientByNATPort looks up client by their assigned NAT port
-func (m *Manager) GetClientByNATPort(port int) (*ClientSession, bool) {
+// GetClientByIP looks up client by their assigned IP
+func (m *Manager) GetClientByIP(ip int) (*ClientSession, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	session, exists := m.natPorts[port]
+	session, exists := m.assignedIPs[ip]
 	return session, exists
 }
 
@@ -107,23 +110,23 @@ func (m *Manager) GetOrAddClient(addr *net.UDPAddr) (*ClientSession, error) {
 		return session, nil
 	}
 
-	// Allocate NAT port
-	natPort, err := m.PortPool.Allocate()
+	// Allocate IP
+	assignedIP, err := m.IPPool.Allocate()
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate NAT port: %w", err)
+		return nil, fmt.Errorf("failed to allocate IP: %w", err)
 	}
 
 	// Create new session
 	session := &ClientSession{
 		Addr:        addr,
-		NATPort:     natPort,
+		AssignedIP:  assignedIP,
 		LastSeen:    time.Now(),
 		ConnectedAt: time.Now(),
 	}
 	m.sessions[key] = session
-	m.natPorts[natPort] = session
+	m.assignedIPs[assignedIP] = session
 
-	fmt.Printf("Client connected: %s -> NAT Port: %d\n", addr.String(), natPort)
+	fmt.Printf("Client connected: %s -> Assigned IP: 10.8.0.%d\n", addr.String(), assignedIP)
 	return session, nil
 }
 
@@ -134,12 +137,12 @@ func (m *Manager) RemoveClient(addr *net.UDPAddr) {
 
 	key := addr.String()
 	if session, exists := m.sessions[key]; exists {
-		// Release NAT port
-		m.PortPool.Release(session.NATPort)
-		delete(m.natPorts, session.NATPort)
+		// Release IP
+		m.IPPool.Release(session.AssignedIP)
+		delete(m.assignedIPs, session.AssignedIP)
 		delete(m.sessions, key)
 
-		fmt.Printf("Client disconnected: %s (NAT Port: %d)\n", addr.String(), session.NATPort)
+		fmt.Printf("Client disconnected: %s (Assigned IP: 10.8.0.%d)\n", addr.String(), session.AssignedIP)
 	}
 }
 
@@ -182,9 +185,9 @@ func (m *Manager) CleanupStale(timeout time.Duration) int {
 
 	for key, session := range m.sessions {
 		if now.Sub(session.LastSeen) > timeout {
-			// Release NAT port
-			m.PortPool.Release(session.NATPort)
-			delete(m.natPorts, session.NATPort)
+			// Release IP
+			m.IPPool.Release(session.AssignedIP)
+			delete(m.assignedIPs, session.AssignedIP)
 			delete(m.sessions, key)
 			removed++
 		}
@@ -233,7 +236,7 @@ func (m *Manager) GetSessionInfo(addr *net.UDPAddr) map[string]interface{} {
 
 	return map[string]interface{}{
 		"address":      session.Addr.String(),
-		"nat_port":     session.NATPort,
+		"assigned_ip":  fmt.Sprintf("10.8.0.%d", session.AssignedIP),
 		"connected_at": session.ConnectedAt,
 		"last_seen":    session.LastSeen,
 		"bytes_sent":   session.BytesSent,

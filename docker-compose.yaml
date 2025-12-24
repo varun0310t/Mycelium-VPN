@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  vpn-server:
+    build:
+      context: .
+      dockerfile: ./src/server/dockerfile
+    container_name: vpn-server
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun
+    ports:
+      - "8080:8080/udp"
+    restart: unless-stopped
+    networks:
+      - vpn-network
+    sysctls:
+      - net.ipv4.ip_forward=1
+
+networks:
+  vpn-network:
+    driver: bridge

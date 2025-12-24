@@ -6,18 +6,20 @@ import (
 )
 
 type ServerConfig struct {
-	ListenAddress string   `json:"listen_address"`
-	ListenPort    int      `json:"listen_port"`
-	TunIP         string   `json:"tun_ip"`
-	TunSubnet     string   `json:"tun_subnet"`
-	DNS           []string `json:"dns_servers"`
-	MaxClients    int      `json:"max_clients"`
-	LogLevel      string   `json:"log_level"`
-	TLSEnabled    bool     `json:"tls_enabled"`
-	CertFile      string   `json:"cert_file"`
-	KeyFile       string   `json:"key_file"`
-	NATPortMin    int      `json:"nat_port_min"`
-	NATPortMax    int      `json:"nat_port_max"`
+	ListenAddress     string   `json:"listen_address"`
+	ListenPort        int      `json:"listen_port"`
+	TunIP             string   `json:"tun_ip"`
+	TunSubnet         string   `json:"tun_subnet"`
+	DNS               []string `json:"dns_servers"`
+	MaxClients        int      `json:"max_clients"`
+	LogLevel          string   `json:"log_level"`
+	TLSEnabled        bool     `json:"tls_enabled"`
+	CertFile          string   `json:"cert_file"`
+	KeyFile           string   `json:"key_file"`
+	IPPoolMin         int      `json:"ip_pool_min"`
+	IPPoolMax         int      `json:"ip_pool_max"`
+	TunDevice         string   `json:"tun_device"`
+	OutgoingInterface string   `json:"outgoing_interface"`
 }
 
 type ClientConfig struct {
@@ -40,7 +42,7 @@ func LoadServerConfig() (*ServerConfig, error) {
 		if os.IsNotExist(err) {
 			return &ServerConfig{
 				ListenAddress: "0.0.0.0",
-				ListenPort:    8443,
+				ListenPort:    8080,
 				TunIP:         "10.8.0.1",
 				TunSubnet:     "10.8.0.0/24",
 				DNS:           []string{"8.8.8.8", "8.8.4.4"},
@@ -49,8 +51,8 @@ func LoadServerConfig() (*ServerConfig, error) {
 				TLSEnabled:    true,
 				CertFile:      "certs/server.crt",
 				KeyFile:       "certs/server.key",
-				NATPortMin:    10000,
-				NATPortMax:    60000,
+				IPPoolMin:     0,
+				IPPoolMax:     255,
 			}, nil
 		}
 		return nil, err
