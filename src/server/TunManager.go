@@ -330,7 +330,7 @@ func (tm *TunManager) receiveLoop() {
 		vpnPacket[0] = byte(0x03) // PacketTypeData
 		copy(vpnPacket[1:], packet)
 
-		go tm.sendToClient(vpnPacket, destIP)
+		tm.sendToClient(vpnPacket, destIP)
 	}
 }
 

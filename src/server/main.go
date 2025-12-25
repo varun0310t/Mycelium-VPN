@@ -108,7 +108,7 @@ func handleDTLSClient(conn net.Conn) {
 		dataCopy := make([]byte, n)
 		copy(dataCopy, buffer[:n])
 
-		go HandlePacket(dataCopy, clientAddr)
+		HandlePacket(dataCopy, clientAddr)
 	}
 }
 

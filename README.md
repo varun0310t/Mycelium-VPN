@@ -5,8 +5,9 @@ A personal, lightweight self-hostable VPN (server + client) implemented in Go.
 ## Key points
 - Functional end-to-end VPN with TUN interface, NAT, routing and client authentication.
 - Uses DTLS for secure transport between client and server.
-- Low latency in tests (responsive), but current throughput is limited — observed ~200 KB/s in typical tests. Bandwidth is a known issue and under active investigation.
-- Originally started as fun learning side project — now a functional lightweight VPN suited for low‑bandwidth needs.
+- Low latency in tests (responsive).
+- Bandwidth issue investigated and fixed — observed speeds after fixes: ~70 Mbit/s download / ~28 Mbit/s upload (results may vary by network). Previously observed ~200 KB/s.
+- Originally started as a learning side project — now a functional lightweight VPN suited for low‑bandwidth and many typical personal use cases.
 
 ## Features
 - TUN interface creation and configuration
@@ -17,10 +18,9 @@ A personal, lightweight self-hostable VPN (server + client) implemented in Go.
 - Config file support (place config in `./config/ServerConfig.json` or mount into container)
 
 ## Current limitations
-- Bandwidth: throughput is currently limited (see Status). Suitable for low-bandwidth tasks.
+- Performance depends on host, Docker networking mode and underlying network; results will vary.
 - Not hardened for large-scale production by default (TLS/DTLS cert management optional).
-- Verbose debug logging can impact performance — disable in production.
-- Currently only supports linux (can be easily ported to windows by few changes needed in network interface and routing)
+- Currently only supports Linux (can be ported with OS-specific changes).
 
 ## Quick start (development)
 1. Build and run:
@@ -30,10 +30,13 @@ A personal, lightweight self-hostable VPN (server + client) implemented in Go.
 2. Place server config at `./config/ServerConfig.json` or mount it into `/app/ServerConfig.json` in the container.
 3. Use the included client (container or native) — requires root to create TUN device.
 
+## Testing
+- iperf3 (recommended):
+  - Server: `docker exec -it vpn-server iperf3 -s`
+  - Client: `docker exec -it vpn-client iperf3 -c 10.8.0.1 -t 10`
+- Quick download test from client:
+    ```bash
+    docker exec -it vpn-client wget -O /dev/null http://ipv4.download.thinkbroadband.com/10MB.zip
+    ```
 
-## Roadmap
-- Investigate and fix bandwidth bottlenecks (MTU tuning, buffering, logging, routing)
-- Improve DTLS certificate management and optional automated provisioning
-- Add config-driven runtime tuning and better defaults
-- Add tests and CI
 

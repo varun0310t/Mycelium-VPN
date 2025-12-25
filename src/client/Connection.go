@@ -194,7 +194,7 @@ func (vc *VPNClient) forwardFromTUN() {
 		}
 
 		// Wrap in VPN data packet and send to server
-		go vc.sendDataPacket(packet)
+		vc.sendDataPacket(packet)
 
 	}
 }
@@ -220,7 +220,7 @@ func (vc *VPNClient) receiveFromServer() {
 
 		switch packetType {
 		case PacketTypeData:
-			go vc.handleDataPacket(payload)
+			vc.handleDataPacket(payload)
 		case PacketTypePong:
 			// Keep-alive response received
 		default:
