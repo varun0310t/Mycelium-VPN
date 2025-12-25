@@ -402,7 +402,7 @@ func (tm *TunManager) ForwardFromClient(packet []byte, assignedIP net.IP) error 
 	// 	}
 	// }
 
-	fmt.Printf("🌍 Forwarding from client: 10.8.0.%d -> %s\n",
+	fmt.Printf(" Forwarding from client: 10.8.0.%s -> %s\n",
 		assignedIP.String(), ipHeader.DstIP.String())
 
 	// Write to TUN - kernel handles NAT and routing

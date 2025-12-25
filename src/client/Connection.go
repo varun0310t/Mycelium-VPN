@@ -129,7 +129,7 @@ func (vc *VPNClient) Connect() error {
 	// Start keep-alive
 	go vc.keepAlive()
 
-	fmt.Println("🚀 VPN connection established!")
+	fmt.Println(" VPN connection established!")
 	return nil
 }
 
@@ -181,7 +181,7 @@ func (vc *VPNClient) forwardFromTUN() {
 		n, err := vc.tunManager.ReadPacket(buffer)
 		if err != nil {
 			if vc.running {
-				fmt.Printf("❌ Error reading from TUN: %v\n", err)
+				fmt.Printf(" Error reading from TUN: %v\n", err)
 			}
 			continue
 		}
@@ -190,7 +190,7 @@ func (vc *VPNClient) forwardFromTUN() {
 
 		if len(packet) >= 20 {
 			destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
-			fmt.Printf("📤 Sending to VPN: dest=%s (%d bytes)\n", destIP.String(), n)
+			fmt.Printf("Sending to VPN: dest=%s (%d bytes)\n", destIP.String(), n)
 		}
 
 		// Wrap in VPN data packet and send to server
@@ -206,7 +206,7 @@ func (vc *VPNClient) receiveFromServer() {
 		n, err := vc.conn.Read(buffer)
 		if err != nil {
 			if vc.running {
-				fmt.Printf("❌ Error receiving from server: %v\n", err)
+				fmt.Printf(" Error receiving from server: %v\n", err)
 			}
 			continue
 		}
@@ -233,7 +233,7 @@ func (vc *VPNClient) handleDataPacket(payload []byte) {
 
 	if len(payload) >= 20 {
 		srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15])
-		fmt.Printf("📥 Received from VPN: src=%s (%d bytes)\n", srcIP.String(), len(payload))
+		fmt.Printf(" Received from VPN: src=%s (%d bytes)\n", srcIP.String(), len(payload))
 	}
 
 	// Write packet to TUN interface
@@ -310,15 +310,15 @@ func (vc *VPNClient) Disconnect() error {
 	// Close TUN interface
 	if vc.tunManager != nil {
 		vc.tunManager.Close()
-		fmt.Println("✅ TUN interface closed")
+		fmt.Println(" TUN interface closed")
 	}
 
 	// Close UDP connection
 	if vc.conn != nil {
 		vc.conn.Close()
-		fmt.Println("✅ Connection closed")
+		fmt.Println(" Connection closed")
 	}
 
-	fmt.Println("✅ VPN disconnected successfully")
+	fmt.Println(" VPN disconnected successfully")
 	return nil
 }

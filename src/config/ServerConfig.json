@@ -1,0 +1,17 @@
+{
+  "listen_address": "0.0.0.0",
+  "listen_port": 8080,
+  "tun_ip": "10.8.0.1",
+  "tun_subnet": "10.8.0.0/24",
+  "tun_device": "tun0",
+  "dns_servers": ["8.8.8.8", "8.8.4.4", "1.1.1.1"],
+  "max_clients": 10,
+  "ip_pool_min": 10,
+  "ip_pool_max": 255,
+  "outgoing_interface": "eth0",
+  "log_level": "info",
+  "password": "VPN1234",
+  "tls_enabled": false,
+  "cert_file": "certs/server.crt",
+  "key_file": "certs/server.key"
+}

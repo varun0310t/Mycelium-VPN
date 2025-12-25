@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 )
 
@@ -24,10 +25,12 @@ type ServerConfig struct {
 }
 
 func LoadServerConfig() (*ServerConfig, error) {
-	path := "config/server_config.json"
+	path := "./src/config/ServerConfig.json"
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+
+		fmt.Printf(" Config file not found at %s, using default config\n", path)
 		// Return default config if file doesn't exist
 		if os.IsNotExist(err) {
 			return &ServerConfig{
