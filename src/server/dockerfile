@@ -12,11 +12,11 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the server with verbose output
-RUN go build -v -o vpn-server ./src/Server.go && \
+# Build the server 
+RUN go build -v -o vpn-server ./cmd/Server/Server.go && \
     chmod +x vpn-server 
 
-# Create certificate directory and generate self-signed certificates for DTLS
+#  certificate directory and generate self-signed certificates for DTLS
 RUN mkdir -p /etc/vpn && \
     openssl req -x509 -newkey rsa:4096 -keyout /etc/vpn/server-key.pem -out /etc/vpn/server-cert.pem \
     -days 365 -nodes -subj "/CN=vpn-server" && \
@@ -26,5 +26,5 @@ RUN mkdir -p /etc/vpn && \
 # Expose VPN port
 EXPOSE 8080/udp
 
-# Use absolute path and add error checking
+
 CMD ["/app/vpn-server"]

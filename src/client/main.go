@@ -34,7 +34,7 @@ func InitClient(serverAddr string, serverPort int) error {
 		return fmt.Errorf("failed to save network config: %w", err)
 	}
 
-	fmt.Printf("✅ VPN Client initialized\n")
+	fmt.Printf(" VPN Client initialized\n")
 	fmt.Printf("Server: %s:%d\n", serverAddr, serverPort)
 	return nil
 }
@@ -49,7 +49,7 @@ func Connect() error {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
 
-	// Setup signal handlers for graceful shutdown
+	// Setup signal handlers for shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 

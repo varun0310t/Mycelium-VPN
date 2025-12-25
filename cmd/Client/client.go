@@ -23,14 +23,14 @@ func main() {
 	// Initialize client
 	err := client.InitClient(*serverAddr, *serverPort)
 	if err != nil {
-		fmt.Printf("❌ Failed to initialize client: %v\n", err)
+		fmt.Printf("Failed to initialize client: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Connect to VPN
 	err = client.Connect()
 	if err != nil {
-		fmt.Printf("❌ Failed to connect: %v\n", err)
+		fmt.Printf("Failed to connect: %v\n", err)
 		client.Disconnect()
 		os.Exit(1)
 	}

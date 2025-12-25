@@ -49,7 +49,7 @@ func NewTunInterface(name string) (*TunInterface, error) {
 		return nil, fmt.Errorf("ioctl TUNSETIFF failed: %v", errno)
 	}
 
-	fmt.Printf("✅ TUN interface %s created (fd: %d)\n", name, fd)
+	fmt.Printf("TUN interface %s created (fd: %d)\n", name, fd)
 
 	return &TunInterface{
 		fd:     fd,
@@ -62,9 +62,16 @@ func NewTunInterface(name string) (*TunInterface, error) {
 func (tun *TunInterface) Configure(ipAddr string, subnet string) error {
 	fmt.Printf("Configuring TUN interface %s...\n", tun.name)
 
+	// Set MTU first
+	cmd := exec.Command("ip", "link", "set", "dev", tun.name, "mtu", "1400")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to set MTU: %w, output: %s", err, string(output))
+	}
+
 	// Flush any existing IP addresses first
-	cmd := exec.Command("ip", "addr", "flush", "dev", tun.name)
-	_ = cmd.Run() // Ignore errors if no IPs exist
+	cmd = exec.Command("ip", "addr", "flush", "dev", tun.name)
+	_ = cmd.Run()
 
 	// Set IP address
 	cmd = exec.Command("ip", "addr", "add", ipAddr+"/24", "dev", tun.name)
@@ -95,21 +102,21 @@ func (tun *TunInterface) SetupNATAndForwarding(subnet string, outInterface strin
 	// Setup NAT masquerading
 	cmd = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", subnet, "-o", outInterface, "-j", "MASQUERADE")
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("⚠️ Warning: iptables NAT rule may already exist: %v\n", err)
+		fmt.Printf(" Warning: iptables NAT rule may already exist: %v\n", err)
 	}
 
 	// Allow forwarding
 	cmd = exec.Command("iptables", "-A", "FORWARD", "-i", tun.name, "-j", "ACCEPT")
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("⚠️ Warning: iptables forward rule may already exist: %v\n", err)
+		fmt.Printf("Warning: iptables forward rule may already exist: %v\n", err)
 	}
 
 	cmd = exec.Command("iptables", "-A", "FORWARD", "-o", tun.name, "-j", "ACCEPT")
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("⚠️ Warning: iptables forward rule may already exist: %v\n", err)
+		fmt.Printf(" Warning: iptables forward rule may already exist: %v\n", err)
 	}
 
-	fmt.Println("✅ NAT and forwarding configured")
+	fmt.Println(" NAT and forwarding configured")
 	return nil
 }
 
@@ -128,7 +135,7 @@ func (tun *TunInterface) WritePacket(packet []byte) error {
 		return fmt.Errorf("failed to write to TUN: %w", err)
 	}
 
-	fmt.Printf("✅ Wrote %d bytes to TUN\n", n)
+	fmt.Printf(" Wrote %d bytes to TUN\n", n)
 	return nil
 }
 
@@ -259,7 +266,6 @@ func CalculateTCPChecksum(packet []byte, srcIP, dstIP net.IP) uint16 {
 	return uint16(^sum)
 }
 
-// TunManager handles routing between VPN clients and TUN interface
 type TunManager struct {
 	tun *TunInterface
 }
@@ -299,7 +305,7 @@ func (tm *TunManager) Start() {
 func (tm *TunManager) receiveLoop() {
 	buffer := make([]byte, 65535)
 
-	fmt.Println("📡 Listening for packets from TUN interface...")
+	fmt.Println("Listening for packets from TUN interface...")
 
 	for {
 		n, err := tm.tun.ReadPacket(buffer)
@@ -333,16 +339,16 @@ func (tm *TunManager) sendToClient(packet []byte, destIP net.IP) {
 	// Get the client session (we only have one client for now, simplify)
 	session, exist := ClientManager.GetClientByIP(destIP)
 	if !exist {
-		fmt.Printf("❌ No client found for IP %s\n", destIP.String())
+		fmt.Printf(" No client found for IP %s\n", destIP.String())
 		return
 	}
 
 	if session.Authenticated {
 		_, err := session.Conn.Write(packet)
 		if err != nil {
-			fmt.Printf("❌ Error sending to client: %v\n", err)
+			fmt.Printf(" Error sending to client: %v\n", err)
 		} else {
-			fmt.Printf("✅ Sent %d bytes to client %s\n", len(packet), session.Addr.String())
+			fmt.Printf(" Sent %d bytes to client %s\n", len(packet), session.Addr.String())
 		}
 		return
 	}

@@ -4,10 +4,9 @@ import (
 	"crypto/tls"
 
 	"github.com/pion/dtls/v2"
-	"github.com/varun0310t/VPN/internal/config"
 )
 
-func LoadDtlsConfig(ServerCfg *config.ServerConfig) (*dtls.Config, error) {
+func LoadDtlsConfig(ServerCfg *ServerConfig) (*dtls.Config, error) {
 
 	cert, err := tls.LoadX509KeyPair("/etc/vpn/server-cert.pem", "/etc/vpn/server-key.pem")
 

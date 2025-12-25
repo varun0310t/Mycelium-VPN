@@ -14,7 +14,7 @@ import (
 type ClientSession struct {
 	Addr          net.Addr // Client address
 	Conn          net.Conn // DTLS connection
-	AssignedIP    net.IP   // Full IP address (e.g., 10.8.0.2)
+	AssignedIP    net.IP   // Full IP address
 	LastSeen      time.Time
 	Authenticated bool
 	BytesSent     uint64

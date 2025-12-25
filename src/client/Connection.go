@@ -30,7 +30,7 @@ const (
 
 type VPNClient struct {
 	serverAddr    *net.UDPAddr
-	conn          net.Conn // Changed to net.Conn for DTLS
+	conn          net.Conn
 	tunManager    *TunManager
 	assignedIP    string
 	authenticated bool
@@ -49,7 +49,7 @@ func NewVPNClient(serverIP string, serverPort int) (*VPNClient, error) {
 	certPool := x509.NewCertPool()
 	serverCert, err := os.ReadFile("/etc/vpn/server-cert.pem")
 	if err != nil {
-		fmt.Printf("⚠️ Warning: Could not load server cert, using insecure mode: %v\n", err)
+		fmt.Printf(" Warning: Could not load server cert, using insecure mode: %v\n", err)
 		certPool = nil
 	} else {
 		certPool.AppendCertsFromPEM(serverCert)
@@ -57,7 +57,7 @@ func NewVPNClient(serverIP string, serverPort int) (*VPNClient, error) {
 
 	// Configure DTLS
 	config := &dtls.Config{
-		InsecureSkipVerify:   certPool == nil, // Only skip in dev/testing
+		InsecureSkipVerify:   certPool == nil,
 		RootCAs:              certPool,
 		ExtendedMasterSecret: dtls.RequireExtendedMasterSecret,
 	}
@@ -69,18 +69,18 @@ func NewVPNClient(serverIP string, serverPort int) (*VPNClient, error) {
 	}
 
 	// Wrap with DTLS
-	fmt.Println("🔒 Establishing encrypted DTLS connection...")
+	fmt.Println(" Establishing encrypted DTLS connection...")
 	dtlsConn, err := dtls.Client(udpConn, config)
 	if err != nil {
 		udpConn.Close()
 		return nil, fmt.Errorf("failed to establish DTLS connection: %w", err)
 	}
 
-	fmt.Println("✅ Encrypted connection established!")
+	fmt.Println(" Encrypted connection established!")
 
 	return &VPNClient{
 		serverAddr: serverAddr,
-		conn:       dtlsConn, // Now encrypted!
+		conn:       dtlsConn,
 		netConfig:  NewNetworkConfig(),
 	}, nil
 }
@@ -90,7 +90,7 @@ func (vc *VPNClient) SaveNetworkConfig() error {
 }
 
 func (vc *VPNClient) Connect() error {
-	fmt.Println("🔐 Authenticating with server...")
+	fmt.Println(" Authenticating with server...")
 
 	// Send authentication request
 	err := vc.sendAuthRequest()
@@ -104,7 +104,7 @@ func (vc *VPNClient) Connect() error {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
-	fmt.Printf("✅ Authenticated! Assigned IP: %s\n", vc.assignedIP)
+	fmt.Printf(" Authenticated! Assigned IP: %s\n", vc.assignedIP)
 
 	// Create TUN interface
 	vc.tunManager, err = NewTunManager("tun1", vc.assignedIP)
@@ -112,7 +112,7 @@ func (vc *VPNClient) Connect() error {
 		return fmt.Errorf("failed to create TUN interface: %w", err)
 	}
 
-	fmt.Println("✅ TUN interface created and configured")
+	fmt.Println(" TUN interface created and configured")
 
 	// Setup routes to route traffic through VPN
 	err = vc.setupRoutes()
@@ -188,7 +188,6 @@ func (vc *VPNClient) forwardFromTUN() {
 
 		packet := buffer[:n]
 
-		// Extract destination IP for logging
 		if len(packet) >= 20 {
 			destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
 			fmt.Printf("📤 Sending to VPN: dest=%s (%d bytes)\n", destIP.String(), n)
@@ -231,7 +230,7 @@ func (vc *VPNClient) receiveFromServer() {
 }
 
 func (vc *VPNClient) handleDataPacket(payload []byte) {
-	// Extract source IP for logging
+
 	if len(payload) >= 20 {
 		srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15])
 		fmt.Printf("📥 Received from VPN: src=%s (%d bytes)\n", srcIP.String(), len(payload))
@@ -240,7 +239,7 @@ func (vc *VPNClient) handleDataPacket(payload []byte) {
 	// Write packet to TUN interface
 	err := vc.tunManager.WritePacket(payload)
 	if err != nil {
-		fmt.Printf("❌ Error writing to TUN: %v\n", err)
+		fmt.Printf(" Error writing to TUN: %v\n", err)
 	}
 }
 
@@ -263,7 +262,7 @@ func (vc *VPNClient) keepAlive() {
 		packet := []byte{byte(PacketTypePing)}
 		_, err := vc.conn.Write(packet)
 		if err != nil {
-			fmt.Printf("⚠️ Keep-alive failed: %v\n", err)
+			fmt.Printf(" Warning: Keep-alive failed: %v\n", err)
 		}
 	}
 }
@@ -283,22 +282,22 @@ func (vc *VPNClient) setupRoutes() error {
 		return fmt.Errorf("failed to add VPN routes: %w", err)
 	}
 
-	fmt.Println("✅ Routes configured")
+	fmt.Println(" Routes configured")
 	return nil
 }
 
 func (vc *VPNClient) Disconnect() error {
 	vc.running = false
 
-	fmt.Println("📡 Restoring original network configuration...")
+	fmt.Println(" Restoring original network configuration...")
 
 	// Restore original network config
 	if vc.netConfig != nil {
 		err := vc.netConfig.Restore()
 		if err != nil {
-			fmt.Printf("⚠️ Warning: failed to restore network config: %v\n", err)
+			fmt.Printf(" Warning: failed to restore network config: %v\n", err)
 		} else {
-			fmt.Println("✅ Network configuration restored")
+			fmt.Println("Network configuration restored")
 		}
 	}
 

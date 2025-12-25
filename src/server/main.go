@@ -8,11 +8,10 @@ import (
 	"net"
 
 	"github.com/pion/dtls/v2"
-	"github.com/varun0310t/VPN/internal/config"
 )
 
 var (
-	ServerCfg     *config.ServerConfig
+	ServerCfg     *ServerConfig
 	udpConn       *net.UDPConn
 	dtlsConn      net.Listener
 	ClientManager *Manager
@@ -21,7 +20,7 @@ var (
 
 func InitServer() error {
 	var err error
-	ServerCfg, err = config.LoadServerConfig()
+	ServerCfg, err = LoadServerConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -61,9 +60,6 @@ func InitServer() error {
 	}
 	fmt.Printf("VPN Server started on %s\n", addr)
 	fmt.Printf("Max clients: %d\n", ServerCfg.MaxClients)
-
-	// TODO: Initialize TUN interface
-	// TODO: Setup routing
 
 	return nil
 }
@@ -112,7 +108,6 @@ func handleDTLSClient(conn net.Conn) {
 		dataCopy := make([]byte, n)
 		copy(dataCopy, buffer[:n])
 
-		// Handle packet (you'll need to adapt this to work with net.Conn)
 		go HandlePacket(dataCopy, clientAddr)
 	}
 }

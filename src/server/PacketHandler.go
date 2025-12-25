@@ -160,7 +160,7 @@ func sendAuthResponse(addr net.Addr, success bool, assignedIP net.IP) {
 		response[1] = ip4[0] // First octet (10)
 		response[2] = ip4[1] // Second octet (8)
 		response[3] = ip4[2] // Third octet (0)
-		response[4] = ip4[3] // Fourth octet (e.g., 2, 3, 4...)
+		response[4] = ip4[3] // Fourth octet
 	} else {
 		// Failure response
 		response = []byte{byte(PacketTypeAuthRespFail)}

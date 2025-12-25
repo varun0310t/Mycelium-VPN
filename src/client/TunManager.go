@@ -48,7 +48,7 @@ func NewTunManager(tunName string, assignedIP string) (*TunManager, error) {
 		return nil, fmt.Errorf("ioctl TUNSETIFF failed: %v", errno)
 	}
 
-	fmt.Printf("✅ TUN interface %s created (fd: %d)\n", tunName, fd)
+	fmt.Printf(" TUN interface %s created (fd: %d)\n", tunName, fd)
 
 	tm := &TunManager{
 		fd:     fd,
@@ -70,13 +70,20 @@ func NewTunManager(tunName string, assignedIP string) (*TunManager, error) {
 func (tm *TunManager) Configure() error {
 	fmt.Printf("Configuring TUN interface %s with IP %s...\n", tm.name, tm.ip)
 
+	// Set MTU first
+	cmd := exec.Command("ip", "link", "set", "dev", tm.name, "mtu", "1400")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to set MTU: %w, output: %s", err, string(output))
+	}
+
 	// Flush any existing IPs
-	cmd := exec.Command("ip", "addr", "flush", "dev", tm.name)
+	cmd = exec.Command("ip", "addr", "flush", "dev", tm.name)
 	_ = cmd.Run()
 
 	// Set IP address
 	cmd = exec.Command("ip", "addr", "add", tm.ip+"/24", "dev", tm.name)
-	output, err := cmd.CombinedOutput()
+	output, err = cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to set IP: %w (output: %s)", err, string(output))
 	}
@@ -88,7 +95,7 @@ func (tm *TunManager) Configure() error {
 		return fmt.Errorf("failed to bring interface up: %w (output: %s)", err, string(output))
 	}
 
-	fmt.Printf("✅ TUN interface configured: %s (%s/24)\n", tm.name, tm.ip)
+	fmt.Printf(" TUN interface configured: %s (%s/24)\n", tm.name, tm.ip)
 	return nil
 }
 
