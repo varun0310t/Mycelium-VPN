@@ -30,13 +30,3 @@ A personal, lightweight self-hostable VPN (server + client) implemented in Go.
 2. Place server config at `./config/ServerConfig.json` or mount it into `/app/ServerConfig.json` in the container.
 3. Use the included client (container or native) — requires root to create TUN device.
 
-## Testing
-- iperf3 (recommended):
-  - Server: `docker exec -it vpn-server iperf3 -s`
-  - Client: `docker exec -it vpn-client iperf3 -c 10.8.0.1 -t 10`
-- Quick download test from client:
-    ```bash
-    docker exec -it vpn-client wget -O /dev/null http://ipv4.download.thinkbroadband.com/10MB.zip
-    ```
-
-
