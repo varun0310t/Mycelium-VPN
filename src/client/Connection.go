@@ -191,8 +191,8 @@ func (vc *VPNClient) forwardFromTUN() {
 		packet := buffer[:n]
 
 		if len(packet) >= 20 {
-			destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
-			fmt.Printf("Sending to VPN: dest=%s (%d bytes)\n", destIP.String(), n)
+			//	destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
+			//fmt.Printf("Sending to VPN: dest=%s (%d bytes)\n", destIP.String(), n)
 		}
 
 		// Wrap in VPN data packet and send to server

@@ -99,8 +99,8 @@ func handleDataPacket(payload []byte, clientAddr net.Addr) {
 	ClientManager.UpdateLastSeen(clientAddr)
 	ClientManager.AddBytesRecv(clientAddr, uint64(len(payload)))
 
-	fmt.Printf("Data packet from %s (Assigned IP: %s): %d bytes\n",
-		clientAddr.String(), session.AssignedIP.String(), len(payload))
+	//fmt.Printf("Data packet from %s (Assigned IP: %s): %d bytes\n",
+	//	clientAddr.String(), session.AssignedIP.String(), len(payload))
 
 	// Forward packet to the TUN interface
 	err := tunManager.ForwardFromClient(payload, session.AssignedIP)
