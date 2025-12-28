@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -138,8 +139,9 @@ func (tun *TunInterface) WritePacket(packet []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to write to TUN: %w", err)
 	}
+	_ = n
 
-	fmt.Printf(" Wrote %d bytes to TUN\n", n)
+	//fmt.Printf(" Wrote %d bytes to TUN\n", n)
 	return nil
 }
 
@@ -310,7 +312,10 @@ func (tm *TunManager) receiveLoop() {
 	buffer := make([]byte, 65535)
 
 	fmt.Println("Listening for packets from TUN interface...")
+	//counjter for how many packets server processd from tun interface
 
+	packetRecCounter := 0
+	prevRecTime := time.Now().UnixMilli()
 	for {
 		n, err := tm.tun.ReadPacket(buffer)
 		if err != nil {
@@ -325,9 +330,9 @@ func (tm *TunManager) receiveLoop() {
 		}
 
 		destIP := net.IPv4(packet[16], packet[17], packet[18], packet[19])
-		srcIP := net.IPv4(packet[12], packet[13], packet[14], packet[15])
+		//	srcIP := net.IPv4(packet[12], packet[13], packet[14], packet[15])
 
-		fmt.Printf("📥 TUN packet: %s -> %s (%d bytes)\n", srcIP.String(), destIP.String(), n)
+		//	fmt.Printf("📥 TUN packet: %s -> %s (%d bytes)\n", srcIP.String(), destIP.String(), n)
 
 		// Prepend PacketTypeData header before sending to client
 		vpnPacket := make([]byte, 1+len(packet))
@@ -335,6 +340,15 @@ func (tm *TunManager) receiveLoop() {
 		copy(vpnPacket[1:], packet)
 
 		tm.sendToClient(vpnPacket, destIP)
+		packetRecCounter++
+		// Calculate and print packets per second every second
+		currentRecTime := time.Now().UnixMilli()
+		if currentRecTime-prevRecTime >= 1000 {
+			//different emoji here so i can spot it easily in terminal logs
+			fmt.Printf("Processed %d packets from TUN in the last second\n", packetRecCounter)
+			packetRecCounter = 0
+			prevRecTime = currentRecTime
+		}
 	}
 }
 
@@ -352,7 +366,7 @@ func (tm *TunManager) sendToClient(packet []byte, destIP net.IP) {
 		if err != nil {
 			fmt.Printf(" Error sending to client: %v\n", err)
 		} else {
-			fmt.Printf(" Sent %d bytes to client %s\n", len(packet), session.Addr.String())
+			//		fmt.Printf(" Sent %d bytes to client %s\n", len(packet), session.Addr.String())
 		}
 		return
 	}
@@ -406,8 +420,8 @@ func (tm *TunManager) ForwardFromClient(packet []byte, assignedIP net.IP) error 
 	// 	}
 	// }
 
-	fmt.Printf(" Forwarding from client: 10.8.0.%s -> %s\n",
-		assignedIP.String(), ipHeader.DstIP.String())
+	//fmt.Printf(" Forwarding from client: 10.8.0.%s -> %s\n",
+	//	assignedIP.String(), ipHeader.DstIP.String())
 
 	// Write to TUN - kernel handles NAT and routing
 	return tm.tun.WritePacket(packet)

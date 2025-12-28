@@ -6,6 +6,7 @@ package server
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/pion/dtls/v2"
 )
@@ -87,6 +88,10 @@ func Run() error {
 
 func handleDTLSClient(conn net.Conn) {
 	defer conn.Close()
+	//calculate how mnay packets does server proccessed per second
+
+	packetsCounter := 0
+	prevTime := time.Now().UnixMilli()
 
 	// Get client address
 	clientAddr := conn.RemoteAddr()
@@ -109,6 +114,16 @@ func handleDTLSClient(conn net.Conn) {
 		copy(dataCopy, buffer[:n])
 
 		HandlePacket(dataCopy, clientAddr)
+		packetsCounter++
+
+		// Calculate and print packets per second every second
+		//add one emoji here so i can spot it easily in terminal logs 	🚀
+		currentTime := time.Now().UnixMilli()
+		if currentTime-prevTime >= 1000 {
+			fmt.Printf(" Processed %d packets from %s in the last second\n", packetsCounter, clientAddr)
+			packetsCounter = 0
+			prevTime = currentTime
+		}
 	}
 }
 
