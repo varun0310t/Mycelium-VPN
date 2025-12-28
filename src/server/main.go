@@ -120,7 +120,7 @@ func handleDTLSClient(conn net.Conn) {
 		//add one emoji here so i can spot it easily in terminal logs 	🚀
 		currentTime := time.Now().UnixMilli()
 		if currentTime-prevTime >= 1000 {
-			fmt.Printf("🚀🚀🚀🚀🚀  Processed %d packets from %s in the last second\n", packetsCounter, clientAddr)
+			fmt.Printf(" Processed %d packets from %s in the last second\n", packetsCounter, clientAddr)
 			packetsCounter = 0
 			prevTime = currentTime
 		}

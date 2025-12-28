@@ -345,7 +345,7 @@ func (tm *TunManager) receiveLoop() {
 		currentRecTime := time.Now().UnixMilli()
 		if currentRecTime-prevRecTime >= 1000 {
 			//different emoji here so i can spot it easily in terminal logs
-			fmt.Printf("📥📥📥  Processed %d packets from TUN in the last second\n", packetRecCounter)
+			fmt.Printf("Processed %d packets from TUN in the last second\n", packetRecCounter)
 			packetRecCounter = 0
 			prevRecTime = currentRecTime
 		}

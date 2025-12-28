@@ -26,10 +26,13 @@ type ifreq struct {
 }
 
 type TunManager struct {
-	fd     int
-	name   string
-	ip     string
-	closed bool
+	fd               int
+	name             string
+	ip               string
+	closed           bool
+	resolvBackup     string
+	resolvWasSymlink bool
+	resolvLinkTarget string
 }
 
 func NewTunManager(tunName string, assignedIP string) (*TunManager, error) {
@@ -146,6 +149,26 @@ func (tm *TunManager) ConfigureDNS() error {
 
 	// If systemd-resolved's resolvectl is available, use it to set DNS for the interface
 	if _, err := exec.LookPath("resolvectl"); err == nil {
+		// still back up /etc/resolv.conf so we can restore original state on disconnect
+		dst := "/etc/resolv.conf"
+		backup := fmt.Sprintf("%s.vpn.bak.%d", dst, time.Now().Unix())
+		tm.resolvBackup = backup
+
+		// capture symlink target if any
+		if st, err := os.Lstat(dst); err == nil {
+			if st.Mode()&os.ModeSymlink != 0 {
+				if target, err := os.Readlink(dst); err == nil {
+					tm.resolvWasSymlink = true
+					tm.resolvLinkTarget = target
+				}
+			}
+		}
+
+		// backup existing file content (follows symlink)
+		if data, err := os.ReadFile(dst); err == nil {
+			_ = os.WriteFile(backup, data, 0644)
+		}
+
 		args := append([]string{"dns", tm.name}, dnsServers...)
 		if out, err := exec.Command("resolvectl", args...).CombinedOutput(); err != nil {
 			return fmt.Errorf("resolvectl dns failed: %w - %s", err, string(out))
@@ -157,6 +180,17 @@ func (tm *TunManager) ConfigureDNS() error {
 	// Fallback: update /etc/resolv.conf (backup existing)
 	dst := "/etc/resolv.conf"
 	backup := fmt.Sprintf("%s.vpn.bak.%d", dst, time.Now().Unix())
+	tm.resolvBackup = backup
+
+	// capture symlink target if any
+	if st, err := os.Lstat(dst); err == nil {
+		if st.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(dst); err == nil {
+				tm.resolvWasSymlink = true
+				tm.resolvLinkTarget = target
+			}
+		}
+	}
 
 	// Read existing file (works even if it's a symlink) and back it up if present
 	if data, err := os.ReadFile(dst); err == nil {
@@ -186,6 +220,43 @@ func (tm *TunManager) ConfigureDNS() error {
 	}
 
 	return nil
+}
+
+func (tm *TunManager) RestoreDNS() error {
+	dst := "/etc/resolv.conf"
+
+	// If we recorded a backup path, try to restore it
+	if tm.resolvBackup != "" {
+		// If original was a symlink, restore symlink target
+		if tm.resolvWasSymlink && tm.resolvLinkTarget != "" {
+			// remove current file/symlink
+			_ = os.Remove(dst)
+			if err := os.Symlink(tm.resolvLinkTarget, dst); err != nil {
+				return fmt.Errorf("failed to recreate symlink %s -> %s: %w", dst, tm.resolvLinkTarget, err)
+			}
+			_ = os.Remove(tm.resolvBackup)
+			tm.resolvBackup = ""
+			tm.resolvWasSymlink = false
+			tm.resolvLinkTarget = ""
+			return nil
+		}
+
+		// otherwise restore file contents from backup
+		data, err := os.ReadFile(tm.resolvBackup)
+		if err != nil {
+			return fmt.Errorf("failed to read backup %s: %w", tm.resolvBackup, err)
+		}
+		_ = os.Remove(dst) // remove current file/symlink if present
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			return fmt.Errorf("failed to restore %s from %s: %w", dst, tm.resolvBackup, err)
+		}
+		_ = os.Remove(tm.resolvBackup)
+		tm.resolvBackup = ""
+		return nil
+	}
+
+	// No recorded backup to restore
+	return fmt.Errorf("no resolv.conf backup recorded to restore")
 }
 
 func (tm *TunManager) Close() error {

@@ -331,6 +331,7 @@ func (vc *VPNClient) Disconnect() error {
 		vc.tunManager.Close()
 		fmt.Println(" TUN interface closed")
 	}
+	vc.tunManager.RestoreDNS()
 
 	// Close UDP connection
 	if vc.conn != nil {
