@@ -18,7 +18,21 @@ var (
 
 func InitClient(serverAddr string, serverPort int, password string) error {
 	var err error
+
+	if serverAddr == "" {
+		serverAddr = ClientCfg.SERVERIP
+	}
+
+	if serverPort == 0 {
+		serverPort = ClientCfg.SERVERPORT
+	}
+
+	if password == "" {
+		password = ClientCfg.PASSWORD
+	}
+
 	Password = password
+
 	vpnClient, err = NewVPNClient(serverAddr, serverPort)
 	if err != nil {
 		return fmt.Errorf("failed to create VPN client: %w", err)
