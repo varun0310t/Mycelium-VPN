@@ -13,12 +13,14 @@ import (
 )
 
 type TunManager struct {
-	iface          *wintun.Adapter
-	Name           string
-	ip             string
-	DefaultGateway string
-	closed         bool
-	Session        wintun.Session
+	iface              *wintun.Adapter
+	Name               string
+	ip                 string
+	DefaultGateway     string
+	DefaultInterfaceIP string
+	DefaultInterface   string
+	closed             bool
+	Session            wintun.Session
 }
 
 func NewTunManager(Name string, ip string) (*TunManager, error) {
@@ -36,12 +38,22 @@ func NewTunManager(Name string, ip string) (*TunManager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default gateway: %w", err)
 	}
+	DefaultInterfaceIP, err := getDefaultInterfaceIP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default interface IP: %w", err)
+	}
+	DefaultInterface, err := getDefaultInterface()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default interface: %w", err)
+	}
 	tm := &TunManager{
-		iface:          iface,
-		Name:           Name,
-		ip:             ip,
-		closed:         false,
-		DefaultGateway: gateway,
+		iface:              iface,
+		Name:               Name,
+		ip:                 ip,
+		closed:             false,
+		DefaultGateway:     gateway,
+		DefaultInterfaceIP: DefaultInterfaceIP,
+		DefaultInterface:   DefaultInterface,
 	}
 	err = tm.ConfigureIP()
 	if err != nil {

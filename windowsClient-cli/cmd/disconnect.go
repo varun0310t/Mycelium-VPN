@@ -47,6 +47,7 @@ var disconnectCmd = &cobra.Command{
 			os.Remove(pidFile)
 			return
 		}
+		// implement more graceful shutdown in the future
 
 		// Kill the Process
 		err = process.Kill()

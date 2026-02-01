@@ -6,7 +6,9 @@ package windowsclient
 import (
 	"crypto/x509"
 	"fmt"
+	"log"
 	"net"
+	"os/exec"
 	"time"
 
 	"github.com/pion/dtls/v2"
@@ -30,6 +32,7 @@ const (
 
 type VPNClient struct {
 	serverAddr    *net.UDPAddr
+	ServerIP      string
 	conn          net.Conn
 	tunManager    *TunManager
 	assignedIP    string
@@ -39,6 +42,7 @@ type VPNClient struct {
 }
 
 func NewVPNClient(serverIP string, serverPort int, SecretKEY string) (*VPNClient, error) {
+
 	// Resolve server address
 	serverAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", serverIP, serverPort))
 	if err != nil {
@@ -73,6 +77,7 @@ func NewVPNClient(serverIP string, serverPort int, SecretKEY string) (*VPNClient
 	fmt.Println(" Encrypted connection established!")
 	return &VPNClient{
 		serverAddr: serverAddr,
+		ServerIP:   serverIP,
 		conn:       dtlsConn,
 		SecretKey:  SecretKEY,
 	}, nil
@@ -96,6 +101,11 @@ func (client *VPNClient) Connect() error {
 	client.tunManager, err = NewTunManager("tun1", client.assignedIP)
 	if err != nil {
 		return fmt.Errorf("failed to create TUN interface: %w", err)
+	}
+
+	err = client.tunManager.AddServerRoute(client.ServerIP)
+	if err != nil {
+		return fmt.Errorf("failed to add server route: %w", err)
 	}
 
 	fmt.Println(" TUN interface created and configured")
@@ -125,6 +135,11 @@ func (client *VPNClient) Disconnect() {
 	if client.conn != nil {
 		packet := []byte{byte(PacketTypeDisc)}
 		client.conn.Write(packet)
+	}
+
+	// Remove server route
+	if client.tunManager != nil {
+		client.tunManager.DeleteServerRoute(client.ServerIP)
 	}
 
 	// Close TUN interface
@@ -279,4 +294,46 @@ func (vc *VPNClient) sendDataPacket(packet []byte) error {
 	copy(dataPacket[1:], packet)
 	_, err := vc.conn.Write(dataPacket)
 	return err
+}
+
+// DeleteServerRoute removes the specific route for the server IP
+func (tm *TunManager) DeleteServerRoute(serverIP string) error {
+	log.Printf("Removing route for server %s", serverIP)
+
+	// Command: route delete <server_ip>
+	cmd := exec.Command("route", "delete", serverIP)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Log but don't fail - route might not exist
+		log.Printf("Warning: failed to delete server route: %v, output: %s", err, string(output))
+		return nil
+	}
+
+	log.Printf("Successfully removed route for server %s", serverIP)
+	return nil
+}
+
+// AddServerRoute adds a specific route for the server IP to use the original gateway and interface
+// This prevents VPN traffic from being routed back through the VPN tunnel
+func (tm *TunManager) AddServerRoute(serverIP string) error {
+	log.Printf("Adding route for server %s via gateway %s on interface %s", serverIP, tm.DefaultGateway, tm.DefaultInterface)
+
+	// Get the interface index for the route command
+	interfaceIndex, err := getInterfaceIndex(tm.DefaultInterface)
+	if err != nil {
+		return fmt.Errorf("failed to get interface index: %w", err)
+	}
+
+	// Command: route add <server_ip> mask 255.255.255.255 <gateway> metric 1 if <interface_index>
+	cmd := exec.Command("route", "add", serverIP, "mask", "255.255.255.255",
+		tm.DefaultGateway, "metric", "1", "IF", interfaceIndex)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add server route: %w, output: %s", err, string(output))
+	}
+
+	log.Printf("Successfully added route for server %s with metric 1", serverIP)
+	return nil
 }
